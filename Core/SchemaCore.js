@@ -125,49 +125,67 @@
   // ---- breadcrumb DOM scrape --------------------------------------------
 
   /**
-   * Best-effort breadcrumb extraction. Looks for a few common selectors used
-   * by iMIS RiSE master pages. Returns null if nothing usable was found, so
-   * the caller can omit BreadcrumbList rather than emit a broken one.
+   * Best-effort breadcrumb extraction.
+   *
+   * Walks <li> (or fallback <a>) elements inside a breadcrumb container,
+   * picking up the text and link for each. The final item is typically the
+   * current page, marked aria-current="page" with no anchor - we accept that
+   * and emit a final ListItem without an `item` (Schema.org allows this).
+   *
+   * Returns null if nothing usable was found, so the caller can omit
+   * BreadcrumbList rather than emit a broken one.
    */
   function scrapeBreadcrumb(config) {
-    var selectors = (config.breadcrumb && config.breadcrumb.selectors) || [
-      'nav.breadcrumb a',
-      'nav[aria-label="breadcrumb"] a',
-      'ol.breadcrumb a',
-      '.breadcrumbs a',
-      '.iMISBreadcrumb a',
-      '[data-breadcrumb] a'
-    ];
+    // Container selectors - we look at the container, then walk its <li>s.
+    var containerSelectors =
+      (config.breadcrumb && config.breadcrumb.containerSelectors) || [
+        // iMIS RiSE default
+        '#asi_BreadCrumb',
+        'nav#asi_BreadCrumbNav ol',
+        // Generic Bootstrap-y patterns
+        'ol.breadcrumb',
+        'nav.breadcrumb',
+        'nav[aria-label="breadcrumb"]',
+        '.breadcrumbs',
+        '.iMISBreadcrumb',
+        '[data-breadcrumb]'
+      ];
 
-    for (var i = 0; i < selectors.length; i++) {
-      var anchors = document.querySelectorAll(selectors[i]);
-      if (anchors && anchors.length) {
-        var items = [];
-        for (var j = 0; j < anchors.length; j++) {
-          var a = anchors[j];
-          var text = (a.textContent || '').trim();
-          var href = a.href;
-          if (text && href) {
-            items.push({
-              '@type': 'ListItem',
-              position: items.length + 1,
-              name: text,
-              item: href
-            });
-          }
+    for (var i = 0; i < containerSelectors.length; i++) {
+      var container = document.querySelector(containerSelectors[i]);
+      if (!container) continue;
+
+      var lis = container.querySelectorAll('li');
+      var rows = lis && lis.length ? lis : container.children;
+      if (!rows || !rows.length) continue;
+
+      var items = [];
+      for (var j = 0; j < rows.length; j++) {
+        var row = rows[j];
+        var anchor = row.querySelector ? row.querySelector('a[href]') : null;
+        var text = (anchor ? anchor.textContent : row.textContent || '').trim();
+        if (!text) continue;
+        var entry = {
+          '@type': 'ListItem',
+          position: items.length + 1,
+          name: text
+        };
+        if (anchor && anchor.href) entry.item = anchor.href;
+        items.push(entry);
+      }
+
+      if (items.length >= 1) {
+        // If the last item has an `item`, append the current page so the
+        // trail ends on the page the user is on.
+        var last = items[items.length - 1];
+        if (last.item && last.item !== canonicalUrl() && pageTitle()) {
+          items.push({
+            '@type': 'ListItem',
+            position: items.length + 1,
+            name: pageTitle()
+          });
         }
-        if (items.length >= 2) {
-          // Append the current page as the final, item-less crumb if not present.
-          var last = items[items.length - 1];
-          if (last.item !== canonicalUrl() && pageTitle()) {
-            items.push({
-              '@type': 'ListItem',
-              position: items.length + 1,
-              name: pageTitle()
-            });
-          }
-          return items;
-        }
+        return items;
       }
     }
     return null;
