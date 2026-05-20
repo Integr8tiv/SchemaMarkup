@@ -112,12 +112,29 @@
   function matchesAny(path, patternList) {
     if (!patternList || !patternList.length) return false;
     for (var i = 0; i < patternList.length; i++) {
-      var p = (patternList[i] || '').toLowerCase().trim();
-      if (!p) continue;
-      // Treat each pattern as a prefix; match with or without a trailing slash.
-      if (path === p || path.indexOf(p + '/') === 0 || path.indexOf(p) === 0) {
-        return true;
+      var raw = (patternList[i] || '').trim();
+      if (!raw) continue;
+      var p = raw.toLowerCase();
+
+      // RegExp pattern: /.../ - caller can pass a regex literal as a string
+      // (e.g. '/^/web/content/about-us//') for full control.
+      if (raw.length > 2 && raw[0] === '/' && raw.lastIndexOf('/') > 0) {
+        var lastSlash = raw.lastIndexOf('/');
+        if (lastSlash > 0 && lastSlash < raw.length - 1) {
+          // looks like a flagged regex literal: /pattern/flags
+          try {
+            var body = raw.slice(1, lastSlash);
+            var flags = raw.slice(lastSlash + 1);
+            if (new RegExp(body, flags).test(path)) return true;
+            continue;
+          } catch (e) { /* fall through to substring match */ }
+        }
       }
+
+      // Default behaviour: substring match anywhere in the path.
+      // Catches both clean URLs (/about-us) and iMIS RiSE .aspx URLs
+      // (/web/content/about-us/about-us.aspx) with the same pattern.
+      if (path.indexOf(p) !== -1) return true;
     }
     return false;
   }
