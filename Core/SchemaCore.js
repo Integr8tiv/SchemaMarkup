@@ -375,23 +375,54 @@
       return;
     }
 
+    function build() {
+      var pageType = detectPageType(config);
+      log('page type:', pageType, 'path:', global.location.pathname);
+
+      var graph = [
+        buildOrganization(config),
+        buildWebSite(config),
+        buildWebPage(config, pageType)
+      ];
+
+      var crumbItems = scrapeBreadcrumb(config);
+      var crumb = buildBreadcrumb(crumbItems);
+      if (crumb) graph.push(crumb);
+      else log('breadcrumb skipped (no usable trail found yet)');
+
+      emit(graph.filter(Boolean));
+      return !!crumb; // true if a breadcrumb was included this time
+    }
+
     function run() {
       try {
-        var pageType = detectPageType(config);
-        log('page type:', pageType, 'path:', global.location.pathname);
+        var hadCrumb = build();
 
-        var graph = [
-          buildOrganization(config),
-          buildWebSite(config),
-          buildWebPage(config, pageType)
-        ];
+        // iMIS RiSE often renders the breadcrumb after DOMContentLoaded
+        // (deferred populate via a follow-up script). If we didn't see one
+        // on the first pass, watch the breadcrumb container until it has
+        // children, then re-emit. Give up after a few seconds so we don't
+        // observe forever.
+        if (!hadCrumb && typeof MutationObserver === 'function') {
+          var container =
+            document.getElementById('masterMainBreadcrumb') ||
+            document.querySelector('nav#asi_BreadCrumbNav') ||
+            document.querySelector('#asi_BreadCrumb');
+          if (!container) return;
 
-        var crumbItems = scrapeBreadcrumb(config);
-        var crumb = buildBreadcrumb(crumbItems);
-        if (crumb) graph.push(crumb);
-        else log('breadcrumb skipped (no usable trail found)');
+          var obs = new MutationObserver(function () {
+            var items = scrapeBreadcrumb(config);
+            if (items && items.length) {
+              log('breadcrumb appeared after initial render, re-emitting');
+              obs.disconnect();
+              build();
+            }
+          });
+          obs.observe(container, { childList: true, subtree: true });
 
-        emit(graph.filter(Boolean));
+          // Safety cap: stop watching after 8 seconds.
+          setTimeout(function () { obs.disconnect(); }, 8000);
+        }
       } catch (err) {
         // eslint-disable-next-line no-console
         if (isDebug()) console.error('[I8VSchemaMarkup] error:', err);
